@@ -617,4 +617,6 @@ pythontex-files-*/
 *.ttt
 *.fff
 
-
+# Project files
+.*.d
+sr
