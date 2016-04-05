@@ -620,3 +620,4 @@ pythontex-files-*/
 # Project files
 .*.d
 sr
+logfile
