@@ -11,6 +11,7 @@
  * 90904102
  **********************************************************************/
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 #include <strings.h>
@@ -68,7 +69,7 @@ void sr_handlepacket(struct sr_instance* sr,
     assert(packet);
     assert(interface);
 
-    printf("*** -> Received packet of length %d \n",len);
+    printf("*** -> Received packet of length %d on interface \"%s\"\n", len, interface);
 
     // Deconstruct the packet's ethernet header
     struct sr_ethernet_hdr header;
@@ -87,7 +88,36 @@ void sr_handlepacket(struct sr_instance* sr,
                 // Check the ARP opcode
                 if(arp_header.ar_op == ARP_REQUEST) {
                     printf("\tIt's an ARP request!\n");
+
+                    // Create ARP reply :)
+                    struct sr_arphdr arp_reply;
+                    memcpy(&arp_reply, &arp_header, sizeof(struct sr_arphdr));
+                    arp_reply.ar_op = htons(ARP_REPLY);
+                    memcpy(&arp_reply.ar_sha, &arp_header.ar_tha, ETHER_ADDR_LEN);
+                    memcpy(&arp_reply.ar_tha, &arp_header.ar_sha, ETHER_ADDR_LEN);
+                    memcpy(&arp_reply.ar_sip, &arp_header.ar_tip, sizeof(uint32_t));
+                    memcpy(&arp_reply.ar_tip, &arp_header.ar_sip, sizeof(uint32_t));
+
+                    // Get the interface address
+                    struct sr_if* iface = sr_get_interface(sr, interface);
+                    if ( iface == 0 ) {
+                        fprintf( stderr, "** Error, interface %s, does not exist\n", interface);
+                    }
+
+                    // Create the ethernet header
+                    struct sr_ethernet_hdr eth_reply;
+                    memcpy(&eth_reply.ether_dhost, &header.ether_shost, ETHER_ADDR_LEN);
+                    memcpy(&eth_reply.ether_shost, &iface->addr, ETHER_ADDR_LEN);
+                    eth_reply.ether_type = htons(ETHERTYPE_ARP);
+
+                    // Wrap ARP packet in Ethernet header, add to buffer
+                    uint8_t *buf = malloc(sizeof(eth_reply) + sizeof(arp_reply));
+                    memcpy(buf, &eth_reply, sizeof(eth_reply));
+                    memcpy(buf + sizeof(eth_reply), &arp_reply, sizeof(arp_reply));
+
+                    sr_send_packet(sr, buf, sizeof(eth_reply) + sizeof(arp_reply), interface);
                 } else if(arp_header.ar_op == ARP_REPLY) {
+                    // This shouldn't happen
                     printf("\tIt's an ARP reply!\n");
                 }
                 break;
@@ -104,7 +134,7 @@ void sr_handlepacket(struct sr_instance* sr,
             }
     }
 
-}/* end sr_ForwardPacket */
+} /* end sr_ForwardPacket */
 
 
 /*---------------------------------------------------------------------
