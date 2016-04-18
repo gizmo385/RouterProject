@@ -23,8 +23,6 @@
 #include "sr_router.h"
 #include "sr_protocol.h"
 
-#include "protocol.h"
-
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
  * Scope:  Global
