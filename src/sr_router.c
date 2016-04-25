@@ -27,13 +27,12 @@
 static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
         struct sr_arphdr *arp_header, char *interface);
 
-static void route_ip_packet(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
-	char *interface);
+static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface);
 
 static void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
 	char *interface);
 
-static void search_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header);
+static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
 
 static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t ip_to_find);
 
@@ -107,7 +106,7 @@ void sr_handlepacket(struct sr_instance* sr,
                         break;
                     case ARP_REPLY:
                         printf("IT's an ARP reply!\n");
-			add_to_routing_table(sr, header, interface);
+                        add_to_routing_table(sr, header, interface);
                         break;
                 }
                 break;
@@ -116,7 +115,7 @@ void sr_handlepacket(struct sr_instance* sr,
             {
                 // TODO
                 printf("\tIt's an IP packet!\n");
-		route_ip_packet(sr, header, interface);
+                route_ip_packet(sr, packet, interface);
                 break;
             }
         default:
@@ -169,23 +168,26 @@ static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t i
     ethernet_header.ether_type = htons(ETHERTYPE_ARP);
 }
 
-static void route_ip_packet(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
-	char *interface){
+static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface){
 
-	// Parse the IP packet from the ethernet header
+    // Parse Ethernet header and IP header out of packet
+    struct sr_ethernet_hdr ethernet_header;
+    struct ip ip_header;
+    uint32_t destination_ip_address = 0; // TODO: Comes from IP header
 
 	// Check the routing table for the correct packet
-	search_routing_table(sr, ethernet_header);
+	char *destination = search_routing_table(sr, destination_ip_address);
 
-    // TODO: Change (struct sr_ethernet_hdr *) to (uint8_t *)
-    // We need because we need to the the destination IP from the IP packet
+    if(!destination) {
+        // TODO: Change (struct sr_ethernet_hdr *) to (uint8_t *)
+        // We need because we need to the the destination IP from the IP packet
 #if 0
-    uint32_t destination;
-    send_arp_request(sr, interface, destination);
+        uint32_t destination;
+        send_arp_request(sr, interface, destination);
 #endif
-
-	// Else, forward packet to the correct subsystem (TODO create a checksum)
-
+    } else {
+        // Forward packet to the correct subsystem (TODO create a checksum)
+    }
 }
 
 void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
@@ -201,24 +203,24 @@ void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethern
 	memcpy(&source, ethernet_header->ether_shost, ETHER_ADDR_LEN);
 
 	//TODO memcpy mask somehow
+    // Perhaps we should look up the local loopback address in the routing table?
 
 	sr_add_rt_entry(sr, destination, source, mask, (char *) sr_get_interface(sr, interface)->addr);
-
 }
 
 /*---------------------------------------------------------------------
  * Method: search_routing_table
  * Scope: local
  *
- * Attemepts to find something in the routing table
+ * Attemepts to find the ethernet address for a particular IP in the routing table
  *
  *---------------------------------------------------------------------*/
-static void search_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header){
-
+static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup) {
+    return NULL; // TODO
 }
 
 /*---------------------------------------------------------------------
- * Method: search_routing_table
+ * Method: handle_arp_request
  * Scope: local
  *
  * Handles an ARP request sent to an interface.
