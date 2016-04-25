@@ -25,6 +25,11 @@
 
 void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
         struct sr_arphdr *arp_header, char *interface);
+void route_ip_packet(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
+	char *interface);
+void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
+	char *interface);
+void search_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header);
 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -93,6 +98,7 @@ void sr_handlepacket(struct sr_instance* sr,
                         break;
                     case ARP_REPLY:
                         printf("IT's an ARP reply!\n");
+			add_to_routing_table(sr, header, interface);
                         break;
                 }
                 break;
@@ -101,6 +107,7 @@ void sr_handlepacket(struct sr_instance* sr,
             {
                 // TODO
                 printf("\tIt's an IP packet!\n");
+		route_ip_packet(sr, header, interface);
                 break;
             }
         default:
@@ -111,6 +118,44 @@ void sr_handlepacket(struct sr_instance* sr,
     }
 
 } /* end sr_ForwardPacket */
+
+void route_ip_packet(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
+	char *interface){
+
+	//parse the IP packet from the ethernet header 
+
+	//check the routing table for the correct packet 
+	search_routing_table(sr, ethernet_header);
+
+	//if no entry in the routing table, send an arp request
+
+	// else, forward packet to the correct subsystem (TODO create a checksum)
+
+}
+
+void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
+	char *interface){
+	//void sr_add_rt_entry(struct sr_instance*, struct in_addr,struct in_addr,
+               //   struct in_addr,char*);
+
+	struct in_addr destination;
+	struct in_addr source;
+	struct in_addr mask;
+
+	memcpy(&destination, ethernet_header->ether_dhost, ETHER_ADDR_LEN);
+	memcpy(&source, ethernet_header->ether_shost, ETHER_ADDR_LEN);
+	
+	//TODO memcpy mask somehow
+
+	sr_add_rt_entry(sr, destination, source, mask, 
+		sr_get_interface(sr, interface)->addr);
+
+}
+
+void search_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header){
+
+}
+
 
 void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
         struct sr_arphdr *arp_header, char *interface) {
