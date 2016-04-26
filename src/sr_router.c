@@ -17,11 +17,12 @@
 #include <strings.h>
 #include <string.h>
 
-
 #include "sr_if.h"
 #include "sr_rt.h"
 #include "sr_router.h"
 #include "sr_protocol.h"
+
+#include "arp_cache.h"
 
 /* Function prototypes */
 static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
@@ -29,15 +30,14 @@ static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *e
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface);
 
-static void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
-	char *interface);
-
 static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
 
 static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t ip_to_find);
 
 static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_host,
         uint16_t ether_type, char *packet, size_t len);
+
+struct arp_cache *cache;
 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -53,6 +53,7 @@ void sr_init(struct sr_instance* sr)
     assert(sr);
 
     /* Add initialization code here! */
+    cache = new_arp_cache();
 
 } /* -- sr_init -- */
 
@@ -106,7 +107,10 @@ void sr_handlepacket(struct sr_instance* sr,
                         break;
                     case ARP_REPLY:
                         printf("IT's an ARP reply!\n");
-                        add_to_routing_table(sr, header, interface);
+                        add_arp_cache_entry(cache, arp_header->ar_sip, arp_header->ar_sha);
+                        struct in_addr addr = {arp_header->ar_sip};
+                        printf("Mapping %s to ", inet_ntoa(addr));
+                        fwrite(arp_header->ar_sha, sizeof(char), ETHER_ADDR_LEN, stdout);
                         break;
                 }
                 break;
@@ -146,28 +150,29 @@ static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t i
      *  ----------------------------------------------------------
      *
      * */
-    struct sr_arphdr arp_header;
+    struct sr_arphdr *arp_header = malloc(sizeof(struct sr_arphdr));
 
     // Protocol information
-    arp_header.ar_hrd = ARPHDR_ETHER;
-    arp_header.ar_pro = ETHERTYPE_IP;
-    arp_header.ar_hln = ETHER_ADDR_LEN;
-    arp_header.ar_pln = INET_ADDRSTRLEN;
-    arp_header.ar_op = htons(ARP_REQUEST);
+    arp_header->ar_hrd = htons(ARPHDR_ETHER);
+    arp_header->ar_pro = htons(ETHERTYPE_IP);
+    arp_header->ar_hln = htons(ETHER_ADDR_LEN);
+    arp_header->ar_pln = htons(INET_ADDRSTRLEN);
+    arp_header->ar_op = htons(ARP_REQUEST);
 
     // Important fields in request
-    memcpy(&arp_header.ar_sha, iface->addr, ETHER_ADDR_LEN);
-    bzero(&arp_header.ar_tha, ETHER_ADDR_LEN);
-    memcpy(&arp_header.ar_sip, &iface->ip, sizeof(uint32_t));
-    memcpy(&arp_header.ar_tip, &ip_to_find, sizeof(uint32_t));
+    memcpy(&arp_header->ar_sha, iface->addr, ETHER_ADDR_LEN);
+    bzero(&arp_header->ar_tha, ETHER_ADDR_LEN);
+    memcpy(&arp_header->ar_sip, &iface->ip, sizeof(uint32_t));
+    memcpy(&arp_header->ar_tip, &ip_to_find, sizeof(uint32_t));
 
-    // Create ethernet header
-    struct sr_ethernet_hdr ethernet_header;
-    memset(&ethernet_header.ether_dhost, 0xFF, ETHER_ADDR_LEN);
-    memcpy(&ethernet_header.ether_shost, iface->addr, ETHER_ADDR_LEN);
-    ethernet_header.ether_type = htons(ETHERTYPE_ARP);
+    // Stuff the packet into an ethernet header
+    uint8_t broadcast[ETHER_ADDR_LEN];
+    memset(&broadcast, 0xFF, ETHER_ADDR_LEN);
+    uint8_t *message_buffer = pack_ethernet_packet(broadcast, iface->addr, ETHERTYPE_ARP,
+            (char *) arp_header, sizeof(struct sr_arphdr));
 
-    // Pack teh buffer
+    sr_send_packet(sr, message_buffer, sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arphdr),
+            interface);
 }
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface){
@@ -190,7 +195,12 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
     struct in_addr destination_addr = ip_header.ip_dst;
     uint32_t destination_ip = destination_addr.s_addr;
 
-    // TODO: Check if we're the destination
+    // Check if we're the destination
+    struct sr_if *iface = sr_get_interface(sr, interface);
+    if(destination_ip == iface->ip) {
+        printf("Dropping packet bound for router on %s\n", interface);
+        return;
+    }
 
 	// Check the routing table for the correct packet
 	char *destination = search_routing_table(sr, destination_ip);
@@ -203,24 +213,6 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
     }
 }
 
-void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
-	char *interface) {
-	//void sr_add_rt_entry(struct sr_instance*, struct in_addr,struct in_addr,
-               //   struct in_addr,char*);
-
-	struct in_addr destination;
-	struct in_addr source;
-	struct in_addr mask;
-
-	memcpy(&destination, ethernet_header->ether_dhost, ETHER_ADDR_LEN);
-	memcpy(&source, ethernet_header->ether_shost, ETHER_ADDR_LEN);
-
-	//TODO memcpy mask somehow
-    // Perhaps we should look up the local loopback address in the routing table?
-
-	sr_add_rt_entry(sr, destination, source, mask, (char *) sr_get_interface(sr, interface)->addr);
-}
-
 /*---------------------------------------------------------------------
  * Method: search_routing_table
  * Scope: local
@@ -229,7 +221,7 @@ void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethern
  *
  *---------------------------------------------------------------------*/
 static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup) {
-    return NULL; // TODO
+    return NULL; // TODO while(true) { fix; mem; }
 }
 
 /*---------------------------------------------------------------------
