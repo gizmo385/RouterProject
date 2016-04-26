@@ -245,23 +245,11 @@ static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *e
     memcpy(&arp_reply.ar_sip, &(arp_header->ar_tip), sizeof(uint32_t));
     memcpy(&arp_reply.ar_tip, &(arp_header->ar_sip), sizeof(uint32_t));
 
-    // Create the ethernet header
-    struct sr_ethernet_hdr eth_reply;
-    memcpy(&eth_reply.ether_dhost, ethernet_header->ether_shost, ETHER_ADDR_LEN);
-    memcpy(&eth_reply.ether_shost, iface->addr, ETHER_ADDR_LEN);
-    eth_reply.ether_type = htons(ETHERTYPE_ARP);
-
-    // Wrap ARP packet in Ethernet header, add to buffer
-    uint8_t *buf = malloc(sizeof(eth_reply) + sizeof(arp_reply));
-    memcpy(buf, &eth_reply, sizeof(eth_reply));
-    memcpy(buf + sizeof(eth_reply), &arp_reply, sizeof(arp_reply));
-
-    /*uint8_t *buffer = pack_ethernet_packet(ethernet_header->ether_shost, iface->addr,*/
-            /*ETHERTYPE_ARP, (char *) &arp_reply, sizeof(struct sr_arphdr));*/
-
-    // Send the packet
-    /*sr_send_packet(sr, buffer, sizeof(eth_reply) + sizeof(arp_reply), interface);*/
-    sr_send_packet(sr, buf, sizeof(eth_reply) + sizeof(arp_reply), interface);
+    // Send the reply
+    uint8_t *buffer = pack_ethernet_packet(ethernet_header->ether_shost, iface->addr,
+            ETHERTYPE_ARP, (char *) &arp_reply, sizeof(struct sr_arphdr));
+    sr_send_packet(sr, buffer, sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arphdr),
+            interface);
 }
 
 /*---------------------------------------------------------------------
@@ -278,7 +266,7 @@ static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_
     struct sr_ethernet_hdr header;
     memcpy(&header.ether_dhost, destination_host, ETHER_ADDR_LEN);
     memcpy(&header.ether_shost, source_host, ETHER_ADDR_LEN);
-    header.ether_type = ether_type;
+    header.ether_type = htons(ether_type);
 
     // Pack the header and packet into a buffer
     size_t header_size = sizeof(struct sr_ethernet_hdr);
