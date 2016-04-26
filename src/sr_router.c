@@ -166,32 +166,45 @@ static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t i
     memset(&ethernet_header.ether_dhost, 0xFF, ETHER_ADDR_LEN);
     memcpy(&ethernet_header.ether_shost, iface->addr, ETHER_ADDR_LEN);
     ethernet_header.ether_type = htons(ETHERTYPE_ARP);
+
+    // Pack teh buffer
 }
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface){
-
     // Parse Ethernet header and IP header out of packet
     struct sr_ethernet_hdr ethernet_header;
+    memcpy(&ethernet_header, packet, sizeof(struct sr_ethernet_hdr));
+
     struct ip ip_header;
-    uint32_t destination_ip_address = 0; // TODO: Comes from IP header
+    memcpy(&ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
+
+    // Decrement the TTL and check if it's 0
+    ip_header.ip_ttl -= 1;
+    if(ip_header.ip_ttl <= 0) {
+        return;
+    } else {
+        // TODO Update the checksum
+    }
+
+    // Get the IP packet's destination
+    struct in_addr destination_addr = ip_header.ip_dst;
+    uint32_t destination_ip = destination_addr.s_addr;
+
+    // TODO: Check if we're the destination
 
 	// Check the routing table for the correct packet
-	char *destination = search_routing_table(sr, destination_ip_address);
+	char *destination = search_routing_table(sr, destination_ip);
 
     if(!destination) {
-        // TODO: Change (struct sr_ethernet_hdr *) to (uint8_t *)
-        // We need because we need to the the destination IP from the IP packet
-#if 0
-        uint32_t destination;
-        send_arp_request(sr, interface, destination);
-#endif
+        // Send an ARP request to the destination IP on a specific interface
+        send_arp_request(sr, interface, destination_ip);
     } else {
-        // Forward packet to the correct subsystem (TODO create a checksum)
+        // Forward packet to the correct subsystem
     }
 }
 
 void add_to_routing_table(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
-	char *interface){
+	char *interface) {
 	//void sr_add_rt_entry(struct sr_instance*, struct in_addr,struct in_addr,
                //   struct in_addr,char*);
 
