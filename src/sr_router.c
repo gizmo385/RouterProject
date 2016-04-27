@@ -30,7 +30,7 @@ static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *e
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface);
 
-static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
+static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
 
 static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
         struct in_addr destination);
@@ -221,13 +221,14 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
     }
 
     // Check the routing table for the correct packet
-    char *destination = search_routing_table(sr, destination_ip);
+    struct sr_rt *table_entry = search_routing_table(sr, destination_ip);
 
-    if(!destination) {
+    if(table_entry) {
         // Send an ARP request to the destination IP on a specific interface
-        send_arp_request(sr, iface, destination_addr);
+        struct sr_if *iface = sr_get_interface(sr, table_entry->interface);
+        send_arp_request(sr, iface, table_entry->gw);
     } else {
-        // Forward packet to the correct subsystem
+        // TODO: What do we do here?
     }
 }
 
@@ -235,11 +236,27 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
  * Method: search_routing_table
  * Scope: local
  *
- * Attemepts to find the ethernet address for a particular IP in the routing table
+ * Attempts to find the next hop for a particular IP address
  *
  *---------------------------------------------------------------------*/
-static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup) {
-    return NULL; // TODO while(true) { fix; mem; }
+static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup) {
+
+    struct sr_rt *rt_walker = sr->routing_table;
+
+    while(rt_walker) {
+        // Get the netmask from the routing table entry
+        uint32_t mask = rt_walker->mask.s_addr;
+        uint32_t dest = rt_walker->dest.s_addr;
+
+        if((ip_to_lookup & mask) == dest) {
+            // This means we've found the correct gateway to forward the packet to
+            return rt_walker;
+        } else {
+            rt_walker = rt_walker->next;
+        }
+    }
+
+    return NULL;
 }
 
 /*---------------------------------------------------------------------
