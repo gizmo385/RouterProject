@@ -155,8 +155,8 @@ static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t i
     // Protocol information
     arp_header->ar_hrd = htons(ARPHDR_ETHER);
     arp_header->ar_pro = htons(ETHERTYPE_IP);
-    arp_header->ar_hln = htons(ETHER_ADDR_LEN);
-    arp_header->ar_pln = htons(INET_ADDRSTRLEN);
+    arp_header->ar_hln = ETHER_ADDR_LEN;
+    arp_header->ar_pln = INET_ADDR_LEN;
     arp_header->ar_op = htons(ARP_REQUEST);
 
     // Important fields in request
