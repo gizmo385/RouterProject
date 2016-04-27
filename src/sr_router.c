@@ -28,7 +28,7 @@
 static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
         struct sr_arphdr *arp_header, char *interface);
 
-static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface);
+static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len, char *interface);
 
 static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
 
@@ -75,6 +75,16 @@ void sr_init(struct sr_instance* sr)
  *
  *---------------------------------------------------------------------*/
 
+static void print_ethernet_addr(uint8_t *addr, FILE *file) {
+    for(int i = 0; i < ETHER_ADDR_LEN; i++) {
+        if(i == (ETHER_ADDR_LEN - 1)) {
+            fprintf(file, "%X", addr[i]);
+        } else {
+            fprintf(file, "%X:", addr[i]);
+        }
+    }
+}
+
 void sr_handlepacket(struct sr_instance* sr,
         uint8_t * packet/* lent */,
         unsigned int len,
@@ -107,11 +117,14 @@ void sr_handlepacket(struct sr_instance* sr,
                         handle_arp_request(sr, header, arp_header, interface);
                         break;
                     case ARP_REPLY:
-                        printf("IT's an ARP reply!\n");
+                        printf("\tIt's an ARP reply!\n");
+                        // Add to the ARP cache
                         add_arp_cache_entry(cache, arp_header->ar_sip, arp_header->ar_sha);
+
                         struct in_addr addr = {arp_header->ar_sip};
-                        printf("Mapping %s to ", inet_ntoa(addr));
-                        fwrite(arp_header->ar_sha, sizeof(char), ETHER_ADDR_LEN, stdout);
+                        printf("\tMapping %s to ", inet_ntoa(addr));
+                        print_ethernet_addr(arp_header->ar_sha, stdout);
+                        printf("\n");
                         break;
                 }
                 break;
@@ -120,7 +133,7 @@ void sr_handlepacket(struct sr_instance* sr,
             {
                 // TODO
                 printf("\tIt's an IP packet!\n");
-                route_ip_packet(sr, packet, interface);
+                route_ip_packet(sr, packet, len, interface);
                 break;
             }
         default:
@@ -165,21 +178,8 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
     memcpy(&arp_header->ar_tip, &destination.s_addr, sizeof(uint32_t));
 
     struct in_addr ip_addr = { iface->ip };
-
-    // Frustratingly necessary pointer nonsense to print IP addresses because inet_ntoa sucks
-    char *temp = inet_ntoa(ip_addr);
-    char *ip_addr_str = calloc(strlen(temp) + 1, sizeof(char));
-    strcpy(ip_addr_str, temp);
-    temp = inet_ntoa(destination);
-    char *destination_str = calloc(strlen(temp) + 1, sizeof(char));
-    strcpy(destination_str, temp);
-
-    printf("\tSending ARP request from %s (%s) looking for %s\n", ip_addr_str, iface->name,
-            destination_str);
-
-    // Let's be decent C programmers in an undecent time
-    free(ip_addr_str);
-    free(destination_str);
+    printf("*** -> Sent ARP request from %s (%s) looking for ", inet_ntoa(ip_addr), iface->name);
+    printf("%s\n", inet_ntoa(destination));
 
     // Stuff the packet into an ethernet header
     uint8_t broadcast[ETHER_ADDR_LEN];
@@ -191,7 +191,7 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
             iface->name);
 }
 
-static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface){
+static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len, char *interface) {
     // Parse Ethernet header and IP header out of packet
     struct sr_ethernet_hdr ethernet_header;
     memcpy(&ethernet_header, packet, sizeof(struct sr_ethernet_hdr));
@@ -203,15 +203,13 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
     ip_header.ip_ttl -= 1;
     if(ip_header.ip_ttl <= 0) {
         return;
-    } else {
-        // TODO Update the checksum
     }
+
+    // TODO Update the checksum
 
     // Get the IP packet's destination
     struct in_addr destination_addr = ip_header.ip_dst;
     uint32_t destination_ip = destination_addr.s_addr;
-
-    printf("Found an IP packet bound for %s\n", inet_ntoa(destination_addr));
 
     // Check if we're the destination
     struct sr_if *iface = sr_get_interface(sr, interface);
@@ -220,13 +218,35 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
         return;
     }
 
-    // Check the routing table for the correct packet
+    // Check the routing table for the correct gateway to forward the packet through
     struct sr_rt *table_entry = search_routing_table(sr, destination_ip);
 
     if(table_entry) {
-        // Send an ARP request to the destination IP on a specific interface
-        struct sr_if *iface = sr_get_interface(sr, table_entry->interface);
-        send_arp_request(sr, iface, table_entry->gw);
+        // Send an ARP request to the next hop IP on interface for that gateway
+        struct sr_if *gw_iface = sr_get_interface(sr, table_entry->interface);
+
+        // Look up the MAC address of the gateway in the ARP cache
+        uint8_t *gw_addr = search_arp_cache(cache, table_entry->gw.s_addr);
+
+        if(gw_addr) {
+            printf("\tFound that %s --> ", inet_ntoa(table_entry->gw));
+            print_ethernet_addr(gw_addr, stdout);
+            printf("\n");
+
+            // Send the packet to this address
+            char *updated_packet = malloc(sizeof(struct ip) + len);
+            memcpy(updated_packet, &ip_header, sizeof(struct ip));
+            memcpy(updated_packet + sizeof(struct ip), packet, len);
+
+            uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
+                    updated_packet, sizeof(struct ip) + len);
+            sr_send_packet(sr, buffer, len, gw_iface->name);
+        } else {
+            // Otherwise we cache the IP packet and make an ARP request
+            // TODO: Cache the IP packet
+            send_arp_request(sr, gw_iface, table_entry->gw);
+        }
+
     } else {
         // TODO: What do we do here?
     }

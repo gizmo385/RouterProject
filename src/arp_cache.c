@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <sys/time.h>
+#include <stdio.h>
 
 #include "sr_protocol.h"
 #include "arp_cache.h"
@@ -15,6 +16,11 @@ struct arp_cache *new_arp_cache() {
 }
 
 void add_arp_cache_entry(struct arp_cache *cache, uint32_t ip_address, uint8_t *ethernet_address) {
+    if(search_arp_cache(cache, ip_address)) {
+        // Address already in cache
+        return;
+    }
+
     struct arp_cache_entry *entry = new_arp_cache_entry(ip_address, ethernet_address);
 
     if(! cache->head) {
