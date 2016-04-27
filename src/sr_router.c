@@ -32,7 +32,8 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
 
 static char *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup);
 
-static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t ip_to_find);
+static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
+        struct in_addr destination);
 
 static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_host,
         uint16_t ether_type, char *packet, size_t len);
@@ -138,10 +139,8 @@ void sr_handlepacket(struct sr_instance* sr,
  * Broadcasts an ARP request looking for ip_to_find on the interface supplied
  *
  *---------------------------------------------------------------------*/
-static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t ip_to_find) {
-    // Get the interface address
-    struct sr_if *iface = sr_get_interface(sr, interface);
-
+static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
+        struct in_addr destination) {
     /*
      * Important info from header
      *  ----------------------------------------------------------
@@ -163,7 +162,7 @@ static void send_arp_request(struct sr_instance *sr, char *interface, uint32_t i
     memcpy(&arp_header->ar_sha, iface->addr, ETHER_ADDR_LEN);
     bzero(&arp_header->ar_tha, ETHER_ADDR_LEN);
     memcpy(&arp_header->ar_sip, &iface->ip, sizeof(uint32_t));
-    memcpy(&arp_header->ar_tip, &ip_to_find, sizeof(uint32_t));
+    memcpy(&arp_header->ar_tip, &destination.s_addr, sizeof(uint32_t));
 
     // Stuff the packet into an ethernet header
     uint8_t broadcast[ETHER_ADDR_LEN];
@@ -207,7 +206,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
 
     if(!destination) {
         // Send an ARP request to the destination IP on a specific interface
-        send_arp_request(sr, interface, destination_ip);
+        send_arp_request(sr, iface, destination_addr);
     } else {
         // Forward packet to the correct subsystem
     }
