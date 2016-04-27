@@ -75,6 +75,10 @@
 #endif
 #endif
 
+#ifndef INET_ADDR_LEN
+#define INET_ADDR_LEN 4
+#endif
+
 /*
  * Structure of an internet header, naked of options.
  */
