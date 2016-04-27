@@ -164,6 +164,23 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
     memcpy(&arp_header->ar_sip, &iface->ip, sizeof(uint32_t));
     memcpy(&arp_header->ar_tip, &destination.s_addr, sizeof(uint32_t));
 
+    struct in_addr ip_addr = { iface->ip };
+
+    // Frustratingly necessary pointer nonsense to print IP addresses because inet_ntoa sucks
+    char *temp = inet_ntoa(ip_addr);
+    char *ip_addr_str = calloc(strlen(temp) + 1, sizeof(char));
+    strcpy(ip_addr_str, temp);
+    temp = inet_ntoa(destination);
+    char *destination_str = calloc(strlen(temp) + 1, sizeof(char));
+    strcpy(destination_str, temp);
+
+    printf("\tSending ARP request from %s (%s) looking for %s\n", ip_addr_str, iface->name,
+            destination_str);
+
+    // Let's be decent C programmers in an undecent time
+    free(ip_addr_str);
+    free(destination_str);
+
     // Stuff the packet into an ethernet header
     uint8_t broadcast[ETHER_ADDR_LEN];
     memset(&broadcast, 0xFF, ETHER_ADDR_LEN);
