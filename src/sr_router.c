@@ -188,7 +188,7 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
             (char *) arp_header, sizeof(struct sr_arphdr));
 
     sr_send_packet(sr, message_buffer, sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arphdr),
-            interface);
+            iface->name);
 }
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *interface){
@@ -211,6 +211,8 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
     struct in_addr destination_addr = ip_header.ip_dst;
     uint32_t destination_ip = destination_addr.s_addr;
 
+    printf("Found an IP packet bound for %s\n", inet_ntoa(destination_addr));
+
     // Check if we're the destination
     struct sr_if *iface = sr_get_interface(sr, interface);
     if(destination_ip == iface->ip) {
@@ -218,8 +220,8 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, char *inter
         return;
     }
 
-	// Check the routing table for the correct packet
-	char *destination = search_routing_table(sr, destination_ip);
+    // Check the routing table for the correct packet
+    char *destination = search_routing_table(sr, destination_ip);
 
     if(!destination) {
         // Send an ARP request to the destination IP on a specific interface
