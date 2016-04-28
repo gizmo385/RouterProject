@@ -234,12 +234,13 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             printf("\n");
 
             // Send the packet to this address
-            char *updated_packet = malloc(sizeof(struct ip) + len);
-            memcpy(updated_packet, &ip_header, sizeof(struct ip));
-            memcpy(updated_packet + sizeof(struct ip), packet, len);
+            char *updated_packet = malloc(ip_header.ip_len);
+            memcpy(updated_packet, &ip_header, ip_header.ip_hl);
+            memcpy(updated_packet + ip_header.ip_hl, packet + 14 + ip_header.ip_hl,
+                    len - 14 - ip_header.ip_hl);
 
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
-                    updated_packet, sizeof(struct ip) + len);
+                    updated_packet, ip_header.ip_len);
             sr_send_packet(sr, buffer, len, gw_iface->name);
         } else {
             // Otherwise we cache the IP packet and make an ARP request
