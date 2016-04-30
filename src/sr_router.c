@@ -36,7 +36,7 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
         struct in_addr destination);
 
 static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_host,
-        uint16_t ether_type, char *packet, size_t len);
+        uint16_t ether_type, uint8_t *packet, size_t len);
 
 struct arp_cache *cache;
 
@@ -185,7 +185,7 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
     uint8_t broadcast[ETHER_ADDR_LEN];
     memset(&broadcast, 0xFF, ETHER_ADDR_LEN);
     uint8_t *message_buffer = pack_ethernet_packet(broadcast, iface->addr, ETHERTYPE_ARP,
-            (char *) arp_header, sizeof(struct sr_arphdr));
+            (uint8_t *) arp_header, sizeof(struct sr_arphdr));
 
     sr_send_packet(sr, message_buffer, sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arphdr),
             iface->name);
@@ -195,6 +195,9 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
     // Copy the IP header
     struct ip *ip_header = malloc(sizeof(struct ip));
     memcpy(ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
+
+    // The IP header is a dirty liar;
+    int actual_header_length = ip_header->ip_hl * 4;
 
     // Decrement the TTL and check if it's 0
     ip_header->ip_ttl -= 1;
@@ -231,11 +234,11 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             printf("\n");
 
             // Send the packet to this address
-            char *updated_packet = malloc(ip_header->ip_len);
-            memcpy(updated_packet, ip_header, ip_header->ip_hl);
-            memcpy(updated_packet + ip_header->ip_hl,
-                    packet + sizeof(struct sr_ethernet_hdr ) + ip_header->ip_hl,
-                    len - sizeof(struct sr_ethernet_hdr ) - ip_header->ip_hl);
+            uint8_t *updated_packet = malloc(ip_header->ip_len);
+            memcpy(updated_packet, ip_header, actual_header_length);
+            memcpy(updated_packet + actual_header_length,
+                    packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
+                    len - sizeof(struct sr_ethernet_hdr ) - actual_header_length);
 
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
                     updated_packet, ip_header->ip_len);
@@ -306,7 +309,7 @@ static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *e
 
     // Send the reply
     uint8_t *buffer = pack_ethernet_packet(ethernet_header->ether_shost, iface->addr,
-            ETHERTYPE_ARP, (char *) &arp_reply, sizeof(struct sr_arphdr));
+            ETHERTYPE_ARP, (uint8_t *) &arp_reply, sizeof(struct sr_arphdr));
     sr_send_packet(sr, buffer, sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arphdr),
             interface);
 }
@@ -320,7 +323,7 @@ static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *e
  *
  *---------------------------------------------------------------------*/
 static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_host,
-        uint16_t ether_type, char *packet, size_t len) {
+        uint16_t ether_type, uint8_t *packet, size_t len) {
     // Create the ethernet header
     struct sr_ethernet_hdr header;
     memcpy(&header.ether_dhost, destination_host, ETHER_ADDR_LEN);
