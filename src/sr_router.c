@@ -192,23 +192,20 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
 }
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len, char *interface) {
-    // Parse Ethernet header and IP header out of packet
-    struct sr_ethernet_hdr ethernet_header;
-    memcpy(&ethernet_header, packet, sizeof(struct sr_ethernet_hdr));
-
-    struct ip ip_header;
-    memcpy(&ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
+    // Copy the IP header
+    struct ip *ip_header = malloc(sizeof(struct ip));
+    memcpy(ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
 
     // Decrement the TTL and check if it's 0
-    ip_header.ip_ttl -= 1;
-    if(ip_header.ip_ttl <= 0) {
+    ip_header->ip_ttl -= 1;
+    if(ip_header->ip_ttl <= 0) {
         return;
     }
 
     // TODO Update the checksum
 
     // Get the IP packet's destination
-    struct in_addr destination_addr = ip_header.ip_dst;
+    struct in_addr destination_addr = ip_header->ip_dst;
     uint32_t destination_ip = destination_addr.s_addr;
 
     // Check if we're the destination
@@ -222,7 +219,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
     struct sr_rt *table_entry = search_routing_table(sr, destination_ip);
 
     if(table_entry) {
-        // Send an ARP request to the next hop IP on interface for that gateway
+        // Get the interface for the gateway
         struct sr_if *gw_iface = sr_get_interface(sr, table_entry->interface);
 
         // Look up the MAC address of the gateway in the ARP cache
@@ -234,13 +231,14 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             printf("\n");
 
             // Send the packet to this address
-            char *updated_packet = malloc(ip_header.ip_len);
-            memcpy(updated_packet, &ip_header, ip_header.ip_hl);
-            memcpy(updated_packet + ip_header.ip_hl, packet + 14 + ip_header.ip_hl,
-                    len - 14 - ip_header.ip_hl);
+            char *updated_packet = malloc(ip_header->ip_len);
+            memcpy(updated_packet, ip_header, ip_header->ip_hl);
+            memcpy(updated_packet + ip_header->ip_hl,
+                    packet + sizeof(struct sr_ethernet_hdr ) + ip_header->ip_hl,
+                    len - sizeof(struct sr_ethernet_hdr ) - ip_header->ip_hl);
 
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
-                    updated_packet, ip_header.ip_len);
+                    updated_packet, ip_header->ip_len);
             sr_send_packet(sr, buffer, len, gw_iface->name);
         } else {
             // Otherwise we cache the IP packet and make an ARP request
