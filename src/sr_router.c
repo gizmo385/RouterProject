@@ -191,12 +191,29 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
             iface->name);
 }
 
+#define CHECKSUM_ALIGNMENT 16
+static uint16_t header_checksum(uint16_t *header, int count) {
+    uint32_t sum = 0;
+
+    while(count--) {
+        sum += *header++;
+
+        if(sum & 0xFFFF0000) {
+            // Carry Occurred
+            sum &= 0xFFFF;
+            sum++;
+        }
+    }
+
+    return ~(sum & 0xFFFF);
+}
+
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len, char *interface) {
     // Copy the IP header
     struct ip *ip_header = malloc(sizeof(struct ip));
     memcpy(ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
 
-    // The IP header is a dirty liar;
+    // The IP header is a dirty liar
     int actual_header_length = ip_header->ip_hl * 4;
 
     // Decrement the TTL and check if it's 0
@@ -205,7 +222,27 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         return;
     }
 
-    // TODO Update the checksum
+    // Zero out the old checksum
+    ip_header->ip_sum = 0;
+
+    // Create a buffer to calculate the checksum
+    uint16_t *header_buffer;
+
+    // Create a chunk of memory aligned to 16 bits
+    posix_memalign((void **) &header_buffer, CHECKSUM_ALIGNMENT, actual_header_length);
+    bzero(header_buffer, actual_header_length);
+
+    // Copy required IP header fields
+    memcpy(header_buffer, ip_header, sizeof(struct ip));
+
+    // Copy the original IP header flags
+    memcpy(header_buffer, packet + sizeof(struct sr_ethernet_hdr) + sizeof(struct ip),
+            actual_header_length - sizeof(struct ip));
+
+    // Calculate the new checksum
+    ip_header->ip_sum = header_checksum(header_buffer, actual_header_length / 2);
+
+    free(header_buffer);
 
     // Get the IP packet's destination
     struct in_addr destination_addr = ip_header->ip_dst;
@@ -229,9 +266,11 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         uint8_t *gw_addr = search_arp_cache(cache, table_entry->gw.s_addr);
 
         if(gw_addr) {
-            printf("\tFound that %s --> ", inet_ntoa(table_entry->gw));
+            printf("\tForwarding packet bound for %s through next hop @ ",
+                    inet_ntoa(destination_addr));
+            printf("%s (", inet_ntoa(table_entry->gw));
             print_ethernet_addr(gw_addr, stdout);
-            printf("\n");
+            printf(")\n");
 
             // Send the packet to this address
             uint8_t *updated_packet = malloc(ip_header->ip_len);
@@ -242,6 +281,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
 
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
                     updated_packet, ip_header->ip_len);
+
             sr_send_packet(sr, buffer, len, gw_iface->name);
         } else {
             // Otherwise we cache the IP packet and make an ARP request
@@ -270,7 +310,7 @@ static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to
         uint32_t mask = rt_walker->mask.s_addr;
         uint32_t dest = rt_walker->dest.s_addr;
 
-        if((ip_to_lookup & mask) == dest) {
+        if((ip_to_lookup & mask) == (dest & mask)) {
             // This means we've found the correct gateway to forward the packet to
             return rt_walker;
         } else {
