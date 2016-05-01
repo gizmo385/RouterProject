@@ -286,6 +286,9 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         } else {
             // Otherwise we cache the IP packet and make an ARP request
             // TODO: Cache the IP packet
+            printf("\tSending ARP request to %s, to forward packet bound for ",
+                    inet_ntoa(table_entry->gw));
+            printf("%s\n", inet_ntoa(destination_addr));
             send_arp_request(sr, gw_iface, table_entry->gw);
         }
 
