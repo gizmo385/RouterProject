@@ -258,12 +258,22 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
     // Check the routing table for the correct gateway to forward the packet through
     struct sr_rt *table_entry = search_routing_table(sr, destination_ip);
 
+    printf("The nexthop is %s\n", inet_ntoa(table_entry->gw));
+
     if(table_entry) {
         // Get the interface for the gateway
         struct sr_if *gw_iface = sr_get_interface(sr, table_entry->interface);
 
-        // Look up the MAC address of the gateway in the ARP cache
-        uint8_t *gw_addr = search_arp_cache(cache, table_entry->gw.s_addr);
+        // Determine the IP to forward to
+        struct in_addr ip_to_forward_to;
+
+        if(table_entry->gw.s_addr == 0) {
+            ip_to_forward_to = destination_addr;
+        } else {
+            ip_to_forward_to = table_entry->gw;
+        }
+
+        uint8_t *gw_addr = search_arp_cache(cache, ip_to_forward_to.s_addr);
 
         if(gw_addr) {
             printf("\tForwarding packet bound for %s through next hop @ ",
@@ -286,10 +296,10 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         } else {
             // Otherwise we cache the IP packet and make an ARP request
             // TODO: Cache the IP packet
-            printf("\tSending ARP request to %s, to forward packet bound for ",
-                    inet_ntoa(table_entry->gw));
+            printf("\tSending ARP request to %s (%s), to forward packet bound for ",
+                    inet_ntoa(ip_to_forward_to), gw_iface->name);
             printf("%s\n", inet_ntoa(destination_addr));
-            send_arp_request(sr, gw_iface, table_entry->gw);
+            send_arp_request(sr, gw_iface, ip_to_forward_to);
         }
 
     } else {
@@ -307,11 +317,25 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
 static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to_lookup) {
 
     struct sr_rt *rt_walker = sr->routing_table;
+    struct sr_rt *default_gateway;
 
     while(rt_walker) {
         // Get the netmask from the routing table entry
         uint32_t mask = rt_walker->mask.s_addr;
         uint32_t dest = rt_walker->dest.s_addr;
+
+        if(dest == 0) {
+            default_gateway = rt_walker;
+            rt_walker = rt_walker->next;
+            continue;
+        }
+
+        struct in_addr temp;
+        temp.s_addr = ip_to_lookup;
+
+        printf("\tMasking %s with ", inet_ntoa(temp));
+        printf("%s and to see if the next hop is ", inet_ntoa(rt_walker->mask));
+        printf("%s\n", inet_ntoa(rt_walker->gw));
 
         if((ip_to_lookup & mask) == (dest & mask)) {
             // This means we've found the correct gateway to forward the packet to
@@ -321,7 +345,7 @@ static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to
         }
     }
 
-    return NULL;
+    return default_gateway;
 }
 
 /*---------------------------------------------------------------------
