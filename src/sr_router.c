@@ -121,7 +121,6 @@ void sr_handlepacket(struct sr_instance* sr,
                         break;
                     case ARP_REPLY:
                         printf("\tIt's an ARP reply!\n");
-                        // Add to the ARP cache
                         add_arp_cache_entry(cache, arp_header->ar_sip, arp_header->ar_sha);
 
                         struct in_addr addr = {arp_header->ar_sip};
@@ -129,8 +128,18 @@ void sr_handlepacket(struct sr_instance* sr,
                         print_ethernet_addr(arp_header->ar_sha, stdout);
                         printf("\n");
 
-			//TODO remove IP packets from the cache
-			remove_old_ip_entries(ip_cache, arp_header->ar_sha);
+                        // Scan for packets we can retransmit
+                        struct ip_cache_entry *cache_entry = next_packet_with_dest(ip_cache, addr);
+                        struct sr_if *iface = sr_get_interface(sr, interface);
+
+                        while(cache_entry) {
+                            uint8_t *wrapped_packet = pack_ethernet_packet(arp_header->ar_sha,
+                                    iface->addr, ETHERTYPE_IP, cache_entry->packet, cache_entry->len);
+
+                            sr_send_packet(sr, wrapped_packet,
+                                    sizeof(struct sr_ethernet_hdr) + cache_entry->len,
+                                    iface->name);
+                        }
                         break;
                 }
                 break;
@@ -266,31 +275,31 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
     // Check the routing table for the correct gateway to forward the packet through
     struct sr_rt *table_entry = search_routing_table(sr, destination_ip);
 
-    printf("The nexthop is %s\n", inet_ntoa(table_entry->gw));
+    printf("\tThe nexthop is %s\n", inet_ntoa(table_entry->gw));
 
     if(table_entry) {
         // Get the interface for the gateway
         struct sr_if *gw_iface = sr_get_interface(sr, table_entry->interface);
 
         // Determine the IP to forward to
-        struct in_addr ip_to_forward_to;
+        struct in_addr nexthop;
 
-	// Determine if the IP to forward to is in our network
+        // Determine if the IP to forward to is in our network
         if(table_entry->gw.s_addr == 0) {
-            ip_to_forward_to = destination_addr;
+            nexthop = destination_addr;
         } else {
-            ip_to_forward_to = table_entry->gw;
+            nexthop = table_entry->gw;
         }
 
-	// Create an updated IP packet with the correct headers/data
-	uint8_t *updated_packet = malloc(ip_header->ip_len);
-	memcpy(updated_packet, ip_header, actual_header_length);
-	memcpy(updated_packet + actual_header_length,
-			packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
-			len - sizeof(struct sr_ethernet_hdr ) - actual_header_length);
+        // Create an updated IP packet with the correct headers/data
+        uint8_t *updated_packet = malloc(ip_header->ip_len);
+        memcpy(updated_packet, ip_header, actual_header_length);
+        memcpy(updated_packet + actual_header_length,
+                packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
+                len - sizeof(struct sr_ethernet_hdr ) - actual_header_length);
 
-	// Search the ARP cache for the nexthop
-        uint8_t *gw_addr = search_arp_cache(cache, ip_to_forward_to.s_addr);
+        // Search the ARP cache for the nexthop
+        uint8_t *gw_addr = search_arp_cache(cache, nexthop.s_addr);
 
         if(gw_addr) {
             printf("\tForwarding packet bound for %s through next hop @ ",
@@ -305,13 +314,12 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             sr_send_packet(sr, buffer, len, gw_iface->name);
         } else {
             // Otherwise we cache the IP packet and make an ARP request
-            // TODO: Cache the IP packet
-	
             printf("\tSending ARP request to %s (%s), to forward packet bound for ",
-                    inet_ntoa(ip_to_forward_to), gw_iface->name);
+                    inet_ntoa(nexthop), gw_iface->name);
             printf("%s\n", inet_ntoa(destination_addr));
-            add_ip_cache_entry(ip_cache, updated_packet);
-            send_arp_request(sr, gw_iface, ip_to_forward_to);
+
+            add_ip_cache_entry(ip_cache, updated_packet, nexthop, ip_header->ip_len);
+            send_arp_request(sr, gw_iface, nexthop);
         }
 
     } else {
@@ -341,13 +349,6 @@ static struct sr_rt *search_routing_table(struct sr_instance *sr, uint32_t ip_to
             rt_walker = rt_walker->next;
             continue;
         }
-
-        struct in_addr temp;
-        temp.s_addr = ip_to_lookup;
-
-        printf("\tMasking %s with ", inet_ntoa(temp));
-        printf("%s and to see if the next hop is ", inet_ntoa(rt_walker->mask));
-        printf("%s\n", inet_ntoa(rt_walker->gw));
 
         if((ip_to_lookup & mask) == (dest & mask)) {
             // This means we've found the correct gateway to forward the packet to

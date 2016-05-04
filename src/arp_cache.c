@@ -79,6 +79,7 @@ void remove_old_entries(struct arp_cache *cache) {
             }
         }
 
+        trail = current;
         current = current->next;
     }
 }
