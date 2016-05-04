@@ -23,6 +23,7 @@
 #include "sr_protocol.h"
 
 #include "arp_cache.h"
+#include "ip_cache.h"
 
 /* Function prototypes */
 static void handle_arp_request(struct sr_instance *sr, struct sr_ethernet_hdr *ethernet_header,
@@ -39,6 +40,7 @@ static uint8_t *pack_ethernet_packet(uint8_t *destination_host, uint8_t *source_
         uint16_t ether_type, uint8_t *packet, size_t len);
 
 struct arp_cache *cache;
+struct ip_cache *ip_cache;
 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -55,6 +57,7 @@ void sr_init(struct sr_instance* sr)
 
     /* Add initialization code here! */
     cache = new_arp_cache();
+    ip_cache = new_ip_cache();
 
 } /* -- sr_init -- */
 
@@ -125,6 +128,9 @@ void sr_handlepacket(struct sr_instance* sr,
                         printf("\tMapping %s to ", inet_ntoa(addr));
                         print_ethernet_addr(arp_header->ar_sha, stdout);
                         printf("\n");
+
+			//TODO remove IP packets from the cache
+			remove_old_ip_entries(ip_cache, arp_header->ar_sha);
                         break;
                 }
                 break;
@@ -170,6 +176,8 @@ static void send_arp_request(struct sr_instance *sr, struct sr_if *iface,
     arp_header->ar_hln = ETHER_ADDR_LEN;
     arp_header->ar_pln = INET_ADDR_LEN;
     arp_header->ar_op = htons(ARP_REQUEST);
+
+    //TODO make sure the ARP is for us
 
     // Important fields in request
     memcpy(&arp_header->ar_sha, iface->addr, ETHER_ADDR_LEN);
@@ -267,12 +275,21 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         // Determine the IP to forward to
         struct in_addr ip_to_forward_to;
 
+	// Determine if the IP to forward to is in our network
         if(table_entry->gw.s_addr == 0) {
             ip_to_forward_to = destination_addr;
         } else {
             ip_to_forward_to = table_entry->gw;
         }
 
+	// Create an updated IP packet with the correct headers/data
+	uint8_t *updated_packet = malloc(ip_header->ip_len);
+	memcpy(updated_packet, ip_header, actual_header_length);
+	memcpy(updated_packet + actual_header_length,
+			packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
+			len - sizeof(struct sr_ethernet_hdr ) - actual_header_length);
+
+	// Search the ARP cache for the nexthop
         uint8_t *gw_addr = search_arp_cache(cache, ip_to_forward_to.s_addr);
 
         if(gw_addr) {
@@ -282,13 +299,6 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             print_ethernet_addr(gw_addr, stdout);
             printf(")\n");
 
-            // Send the packet to this address
-            uint8_t *updated_packet = malloc(ip_header->ip_len);
-            memcpy(updated_packet, ip_header, actual_header_length);
-            memcpy(updated_packet + actual_header_length,
-                    packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
-                    len - sizeof(struct sr_ethernet_hdr ) - actual_header_length);
-
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
                     updated_packet, ip_header->ip_len);
 
@@ -296,9 +306,11 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         } else {
             // Otherwise we cache the IP packet and make an ARP request
             // TODO: Cache the IP packet
+	
             printf("\tSending ARP request to %s (%s), to forward packet bound for ",
                     inet_ntoa(ip_to_forward_to), gw_iface->name);
             printf("%s\n", inet_ntoa(destination_addr));
+            add_ip_cache_entry(ip_cache, updated_packet);
             send_arp_request(sr, gw_iface, ip_to_forward_to);
         }
 
