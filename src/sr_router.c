@@ -133,12 +133,18 @@ void sr_handlepacket(struct sr_instance* sr,
                         struct sr_if *iface = sr_get_interface(sr, interface);
 
                         while(cache_entry) {
+                            // Wrap the IP packet in an ethernet header
                             uint8_t *wrapped_packet = pack_ethernet_packet(arp_header->ar_sha,
-                                    iface->addr, ETHERTYPE_IP, cache_entry->packet, cache_entry->len);
+                                    iface->addr, ETHERTYPE_IP, cache_entry->packet,
+                                    cache_entry->len);
 
+                            // Send the newly wrapped packet
                             sr_send_packet(sr, wrapped_packet,
                                     sizeof(struct sr_ethernet_hdr) + cache_entry->len,
                                     iface->name);
+
+                            // TODO: We're dumb are forgot this
+                            cache_entry = next_packet_with_dest(ip_cache, addr);
                         }
                         break;
                 }
@@ -227,11 +233,12 @@ static uint16_t header_checksum(uint16_t *header, int count) {
 
 static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len, char *interface) {
     // Copy the IP header
-    struct ip *ip_header = malloc(sizeof(struct ip));
+    struct ip *ip_header = calloc(1, sizeof(struct ip));
     memcpy(ip_header, packet + sizeof(struct sr_ethernet_hdr), sizeof(struct ip));
 
     // The IP header is a dirty liar
     int actual_header_length = ip_header->ip_hl * 4;
+    int ip_packet_len = len - sizeof(struct sr_ethernet_hdr);
 
     // Decrement the TTL and check if it's 0
     ip_header->ip_ttl -= 1;
@@ -292,7 +299,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
         }
 
         // Create an updated IP packet with the correct headers/data
-        uint8_t *updated_packet = malloc(ip_header->ip_len);
+        uint8_t *updated_packet = calloc(ip_packet_len, sizeof(uint8_t));
         memcpy(updated_packet, ip_header, actual_header_length);
         memcpy(updated_packet + actual_header_length,
                 packet + sizeof(struct sr_ethernet_hdr ) + actual_header_length,
@@ -309,7 +316,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
             printf(")\n");
 
             uint8_t *buffer = pack_ethernet_packet(gw_addr, gw_iface->addr, ETHERTYPE_IP,
-                    updated_packet, ip_header->ip_len);
+                    updated_packet, ip_packet_len);
 
             sr_send_packet(sr, buffer, len, gw_iface->name);
         } else {
@@ -318,7 +325,7 @@ static void route_ip_packet(struct sr_instance *sr, uint8_t *packet, size_t len,
                     inet_ntoa(nexthop), gw_iface->name);
             printf("%s\n", inet_ntoa(destination_addr));
 
-            add_ip_cache_entry(ip_cache, updated_packet, nexthop, ip_header->ip_len);
+            add_ip_cache_entry(ip_cache, updated_packet, nexthop, ip_packet_len);
             send_arp_request(sr, gw_iface, nexthop);
         }
 
