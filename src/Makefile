@@ -34,7 +34,7 @@ endif
 
 CFLAGS = -g -Wall -std=gnu99 -D_DEBUG_ -DVNL $(ARCH)
 
-LIBS= $(SOCK) -lm
+LIBS= $(SOCK) -lm -lpthread
 PFLAGS= -follow-child-processes=yes -cache-dir=/tmp/${USER}
 PURIFY= purify ${PFLAGS}
 

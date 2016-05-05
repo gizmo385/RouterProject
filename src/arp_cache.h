@@ -2,6 +2,8 @@
 #define _ARP_CACHE_H
 
 #include <sys/time.h>
+#include <pthread.h>
+#include <semaphore.h>
 
 #include "sr_protocol.h"
 
@@ -18,6 +20,8 @@ struct arp_cache_entry {
 struct arp_cache {
     struct arp_cache_entry *head;
     struct arp_cache_entry *tail;
+    pthread_t thread;
+    sem_t semaphore;    
 };
 
 extern struct arp_cache *new_arp_cache();
@@ -28,5 +32,7 @@ extern void add_arp_cache_entry(struct arp_cache *cache, uint32_t ip_address,
 extern uint8_t *search_arp_cache(struct arp_cache *cache, uint32_t ip_address);
 
 extern void remove_old_entries(struct arp_cache *cache);
+
+extern void * clean_arp_cache(void * arg);
 
 #endif
