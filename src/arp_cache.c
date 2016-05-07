@@ -81,6 +81,13 @@ uint8_t *search_arp_cache(struct arp_cache *cache, uint32_t ip_address) {
         if(current->ip_address == ip_address) {
             // Refresh the entry in the cache
             gettimeofday(&current->last_refreshed, NULL);
+	   
+             //V(semaphore)
+	    result = sem_post(&(cache->semaphore));
+	    if(result != 0){
+		fprintf(stderr, "ERROR: semaphore post failed in add_cache_entry\n");
+		exit(errno);
+	    }
 
             // Return the ethernet address
             return current->ethernet_address;
