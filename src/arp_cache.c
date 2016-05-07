@@ -15,7 +15,7 @@ struct arp_cache *new_arp_cache() {
     struct arp_cache *cache = calloc(1, sizeof(struct arp_cache));
     cache->head = NULL;
     cache->tail = NULL;
-    
+
     //initialize thread and start it
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -25,8 +25,8 @@ struct arp_cache *new_arp_cache() {
     //initialize semaphore
     int result = sem_init(&cache->semaphore, SHARED, 1);
     if(result != 0){
-       fprintf(stderr, "ERROR: semaphore creation failed\n");
-       exit(errno);
+        fprintf(stderr, "ERROR: semaphore creation failed\n");
+        exit(errno);
     }
 
     return cache;
@@ -38,7 +38,7 @@ void add_arp_cache_entry(struct arp_cache *cache, uint32_t ip_address, uint8_t *
         // Address already in cache
         return;
     }
-    
+
     //P(semaphore)
     printf("adding an entry to arp cache\n");
     int result = sem_wait(&(cache->semaphore));
@@ -52,7 +52,7 @@ void add_arp_cache_entry(struct arp_cache *cache, uint32_t ip_address, uint8_t *
     if(! cache->head) {
         cache->head = entry;
         cache->tail = entry;
-        
+
     } else {
         cache->tail->next = entry;
         cache->tail = entry;
@@ -74,27 +74,27 @@ uint8_t *search_arp_cache(struct arp_cache *cache, uint32_t ip_address) {
         fprintf(stderr, "ERROR: semaphore wait failed in add_cache_entry\n");
         exit(errno);
     }
-    
+
     struct arp_cache_entry *current = cache->head;
 
     while(current) {
         if(current->ip_address == ip_address) {
             // Refresh the entry in the cache
             gettimeofday(&current->last_refreshed, NULL);
-	   
-             //V(semaphore)
-	    result = sem_post(&(cache->semaphore));
-	    if(result != 0){
-		fprintf(stderr, "ERROR: semaphore post failed in add_cache_entry\n");
-		exit(errno);
-	    }
+
+            //V(semaphore)
+            result = sem_post(&(cache->semaphore));
+            if(result != 0){
+                fprintf(stderr, "ERROR: semaphore post failed in add_cache_entry\n");
+                exit(errno);
+            }
 
             // Return the ethernet address
             return current->ethernet_address;
         }
         current = current->next;
     }
-    
+
     //V(semaphore)
     result = sem_post(&(cache->semaphore));
     if(result != 0){
@@ -146,7 +146,7 @@ void remove_old_entries(struct arp_cache *cache) {
         trail = current;
         current = current->next;
     }
-    
+
     //V(semaphore)
     result = sem_post(&(cache->semaphore));
     if(result != 0){
@@ -174,8 +174,8 @@ void * clean_arp_cache(void * arg){
     //loop forever, check the old entries and sleep for the cache lifetime
 
     while(1){
-        sleep(CACHE_LIFETIME);
-        remove_old_entries(cache);	
-    } 
+        sleep(1);
+        remove_old_entries(cache);
+    }
 
 }
