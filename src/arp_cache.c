@@ -106,7 +106,6 @@ uint8_t *search_arp_cache(struct arp_cache *cache, uint32_t ip_address) {
 }
 
 void remove_old_entries(struct arp_cache *cache) {
-    printf("trying to remove old entries\n");
     //P(semaphore)
     int result = sem_wait(&(cache->semaphore));
     if(result != 0) {
@@ -153,7 +152,6 @@ void remove_old_entries(struct arp_cache *cache) {
         fprintf(stderr, "ERROR: semaphore post failed in add_cache_entry\n");
         exit(errno);
     }
-    printf("removed an entry\n");
 }
 
 static struct arp_cache_entry *new_arp_cache_entry(uint32_t ip_address, uint8_t *ethernet_address) {
